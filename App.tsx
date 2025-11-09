@@ -5,7 +5,7 @@ import { HashRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } f
 // Firebase imports
 import { auth, db } from './firebaseConfig';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
-import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, orderBy, query, setDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, orderBy, query, setDoc, serverTimestamp } from 'firebase/firestore';
 
 
 // --- TYPE DEFINITIONS ---
@@ -50,6 +50,14 @@ interface UserInfo {
   skills: Skill[];
 }
 
+interface Message {
+  id: string;
+  name: string;
+  email: string;
+  message: string;
+  createdAt: { seconds: number; nanoseconds: number; }; // Firestore Timestamp
+}
+
 const defaultUserInfo: UserInfo = {
   name: "Загрузка...",
   specialization: "Fullstack-разработчик",
@@ -67,6 +75,7 @@ interface AppContextType {
   userInfo: UserInfo;
   experience: Experience[];
   projects: Project[];
+  messages: Message[];
   user: User | null;
   loading: boolean;
   login: (email: string, pass: string) => Promise<void>;
@@ -78,6 +87,8 @@ interface AppContextType {
   addExperience: (exp: Omit<Experience, 'id'>) => Promise<void>;
   updateExperience: (exp: Experience) => Promise<void>;
   deleteExperience: (id: string) => Promise<void>;
+  sendMessage: (name: string, email: string, message: string) => Promise<void>;
+  deleteMessage: (id: string) => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
@@ -86,6 +97,7 @@ const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [userInfo, setUserInfo] = useState<UserInfo>(defaultUserInfo);
   const [experience, setExperience] = useState<Experience[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -113,6 +125,10 @@ const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
         const projectsQuery = query(collection(db, 'projects'), orderBy('date', 'desc'));
         const projectsSnapshot = await getDocs(projectsQuery);
         setProjects(projectsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Project)));
+        
+        const messagesQuery = query(collection(db, 'messages'), orderBy('createdAt', 'desc'));
+        const messagesSnapshot = await getDocs(messagesQuery);
+        setMessages(messagesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Message)));
 
       } catch (error) {
         console.error("Error fetching data from Firestore:", error);
@@ -176,7 +192,23 @@ const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
     setExperience(prev => prev.filter(e => e.id !== id));
   };
 
-  const value = { userInfo, experience, projects, user, loading, login, logout, addProject, updateProject, deleteProject, updateUserInfo, addExperience, updateExperience, deleteExperience };
+  const sendMessage = async (name: string, email: string, message: string) => {
+    const docRef = await addDoc(collection(db, 'messages'), {
+      name,
+      email,
+      message,
+      createdAt: serverTimestamp(),
+    });
+    // Optimistically update UI, createdAt will be null but it's okay for a moment
+    setMessages(prev => [{ id: docRef.id, name, email, message, createdAt: {seconds: Date.now()/1000, nanoseconds:0} }, ...prev]);
+  };
+  
+  const deleteMessage = async (id: string) => {
+    await deleteDoc(doc(db, 'messages', id));
+    setMessages(prev => prev.filter(m => m.id !== id));
+  };
+
+  const value = { userInfo, experience, projects, messages, user, loading, login, logout, addProject, updateProject, deleteProject, updateUserInfo, addExperience, updateExperience, deleteExperience, sendMessage, deleteMessage };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 };
@@ -221,6 +253,7 @@ const Header: React.FC = () => {
                     <div className="flex items-center space-x-4">
                         <Link to="/" className={navLinkClasses('/')}>Главная</Link>
                         <Link to="/projects" className={navLinkClasses('/projects')}>Проекты</Link>
+                        <Link to="/contact" className={navLinkClasses('/contact')}>Контакт</Link>
                         {user ? (
                             <>
                                 <Link to="/admin" className={navLinkClasses('/admin')}>Админка</Link>
@@ -382,6 +415,58 @@ const LoginPage: React.FC = () => {
                     <button type="submit" className="w-full bg-primary text-dark font-bold py-2 rounded-lg hover:bg-opacity-80 transition-colors disabled:opacity-50" disabled={isLoggingIn}>{isLoggingIn ? 'Вход...' : 'Войти'}</button>
                 </form>
             </div>
+        </div>
+    );
+};
+
+const ContactPage: React.FC = () => {
+    const { sendMessage } = useApp();
+    const [name, setName] = useState('');
+    const [email, setEmail] = useState('');
+    const [message, setMessage] = useState('');
+    const [status, setStatus] = useState<'idle' | 'sending' | 'success' | 'error'>('idle');
+    const [feedbackMessage, setFeedbackMessage] = useState('');
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!name || !email || !message) {
+            setStatus('error');
+            setFeedbackMessage('Пожалуйста, заполните все поля.');
+            return;
+        }
+        setStatus('sending');
+        setFeedbackMessage('');
+        try {
+            await sendMessage(name, email, message);
+            setStatus('success');
+            setFeedbackMessage('Сообщение успешно отправлено! Я свяжусь с вами в ближайшее время.');
+            setName('');
+            setEmail('');
+            setMessage('');
+        } catch (error) {
+            console.error("Failed to send message:", error);
+            setStatus('error');
+            setFeedbackMessage('Произошла ошибка при отправке. Попробуйте еще раз.');
+        }
+    };
+
+    return (
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-16 animate-fade-in-up">
+            <h1 className="text-4xl font-bold text-center mb-4">Связаться со мной</h1>
+            <p className="text-lg text-gray-400 text-center mb-12">Есть вопрос или предложение? Заполните форму ниже.</p>
+            <form onSubmit={handleSubmit} className="bg-gray-800 p-8 rounded-lg shadow-lg w-full space-y-6">
+                <FormInput label="Ваше имя" name="name" value={name} onChange={e => setName(e.target.value)} required />
+                <FormInput label="Ваш Email" name="email" value={email} onChange={e => setEmail(e.target.value)} type="email" required />
+                <FormTextarea label="Сообщение" name="message" value={message} onChange={e => setMessage(e.target.value)} required />
+                
+                {feedbackMessage && (
+                    <p className={`text-center text-sm ${status === 'success' ? 'text-green-400' : 'text-red-500'}`}>{feedbackMessage}</p>
+                )}
+
+                <button type="submit" className="w-full bg-primary text-dark font-bold py-3 rounded-lg hover:bg-opacity-80 transition-colors disabled:opacity-50" disabled={status === 'sending'}>
+                    {status === 'sending' ? 'Отправка...' : 'Отправить сообщение'}
+                </button>
+            </form>
         </div>
     );
 };
@@ -553,9 +638,6 @@ const UserInfoForm: React.FC<{ currentUserInfo: UserInfo; onSave: (data: UserInf
 
     const handleContactChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { name, value } = e.target;
-        // FIX: The `UserInfo` type guarantees `prev.contacts` exists.
-        // The `|| {}` was causing TypeScript to incorrectly infer that the `contacts`
-        // object could be partial, which violates the type definition.
         setFormData(prev => ({ ...prev, contacts: { ...prev.contacts, [name]: value } }));
     };
 
@@ -660,8 +742,7 @@ const UserInfoForm: React.FC<{ currentUserInfo: UserInfo; onSave: (data: UserInf
 };
 
 const AdminPage: React.FC = () => {
-    const { projects, experience, userInfo, addProject, updateProject, deleteProject, updateUserInfo, addExperience, updateExperience, deleteExperience, logout } = useApp();
-    const navigate = useNavigate();
+    const { projects, experience, userInfo, messages, addProject, updateProject, deleteProject, updateUserInfo, addExperience, updateExperience, deleteExperience, deleteMessage } = useApp();
     const [activeTab, setActiveTab] = useState('projects');
     
     const [editingProject, setEditingProject] = useState<Project | null>(null);
@@ -670,8 +751,6 @@ const AdminPage: React.FC = () => {
     const [editingExperience, setEditingExperience] = useState<Experience | null>(null);
     const [isExperienceFormVisible, setIsExperienceFormVisible] = useState(false);
     
-    const handleLogout = async () => { await logout(); navigate('/'); };
-
     const renderProjects = () => (
         <div>
             {isProjectFormVisible ? (
@@ -729,10 +808,37 @@ const AdminPage: React.FC = () => {
         />
     );
     
+    const renderMessages = () => (
+      <div>
+          <h3 className="text-xl font-bold mb-4">Полученные сообщения</h3>
+          {messages.length > 0 ? (
+              <div className="space-y-4">
+                  {messages.map(msg => (
+                      <div key={msg.id} className="bg-gray-800 p-4 rounded-lg">
+                          <div className="flex justify-between items-start">
+                              <div>
+                                  <p className="font-bold">{msg.name} <span className="font-normal text-sm text-gray-400">&lt;{msg.email}&gt;</span></p>
+                                  <p className="text-xs text-gray-500 mt-1">
+                                      {msg.createdAt ? new Date(msg.createdAt.seconds * 1000).toLocaleString('ru-RU') : 'No date'}
+                                  </p>
+                              </div>
+                              <button onClick={() => window.confirm('Удалить это сообщение?') && deleteMessage(msg.id)} className="px-3 py-1 bg-red-600 text-white text-sm rounded hover:bg-red-500">Удалить</button>
+                          </div>
+                          <p className="mt-3 text-gray-300 whitespace-pre-wrap">{msg.message}</p>
+                      </div>
+                  ))}
+              </div>
+          ) : (
+              <p>Нет новых сообщений.</p>
+          )}
+      </div>
+  );
+
     const tabs = [
         { key: 'projects', label: 'Проекты' },
         { key: 'experience', label: 'Опыт работы' },
         { key: 'info', label: 'Личная информация' },
+        { key: 'messages', label: 'Сообщения' },
     ];
     
     return (
@@ -752,6 +858,7 @@ const AdminPage: React.FC = () => {
                 {activeTab === 'projects' && renderProjects()}
                 {activeTab === 'experience' && renderExperience()}
                 {activeTab === 'info' && renderUserInfo()}
+                {activeTab === 'messages' && renderMessages()}
             </div>
         </div>
     );
@@ -792,6 +899,7 @@ const AppContent: React.FC = () => {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/contact" element={<ContactPage />} />
             <Route path="/login" element={<LoginPage />} />
             <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
           </Routes>
