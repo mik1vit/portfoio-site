@@ -90,9 +90,18 @@ const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // We want to stop loading only when both initial data and auth state are resolved.
+    let dataFetched = false;
+    let authChecked = false;
+
+    const stopLoadingIfReady = () => {
+      if (dataFetched && authChecked) {
+        setLoading(false);
+      }
+    };
+
     const fetchData = async () => {
       try {
-        setLoading(true);
         const userInfoDocRef = doc(db, 'userInfo', 'main');
         const userInfoSnap = await getDoc(userInfoDocRef);
         if (userInfoSnap.exists()) setUserInfo(userInfoSnap.data() as UserInfo);
@@ -108,7 +117,8 @@ const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
       } catch (error) {
         console.error("Error fetching data from Firestore:", error);
       } finally {
-        setLoading(false);
+        dataFetched = true;
+        stopLoadingIfReady();
       }
     };
     
@@ -116,10 +126,8 @@ const AppProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
-        // Ensure loading is false after auth state is confirmed
-        if (loading) {
-            setLoading(false);
-        }
+        authChecked = true;
+        stopLoadingIfReady();
     });
 
     return () => unsubscribe();
