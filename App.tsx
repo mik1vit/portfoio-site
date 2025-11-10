@@ -1,9 +1,10 @@
 
+
 import React, { useState, useEffect, useMemo, createContext, useContext, ReactNode } from 'react';
 import { HashRouter, Routes, Route, Link, useNavigate, useLocation, Navigate } from 'react-router-dom';
 
 // Firebase imports
-import { auth, db } from './firebaseConfig';
+import { auth, db } from './firebaseConfig.ts';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from 'firebase/auth';
 import { collection, getDocs, doc, getDoc, addDoc, updateDoc, deleteDoc, orderBy, query, setDoc, serverTimestamp } from 'firebase/firestore';
 
