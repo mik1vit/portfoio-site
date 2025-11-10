@@ -1,5 +1,5 @@
-// FIX: The original named import for 'firebase/app' was causing errors. Switched to a namespace import as a workaround for potential bundler or module resolution issues.
-import * as firebaseApp from "firebase/app";
+// Используем стандартные именованные импорты для всех модулей Firebase для обеспечения согласованности и надежности.
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
@@ -15,8 +15,7 @@ const firebaseConfig = {
 
 // Инициализация Firebase
 // Проверяем, инициализировано ли уже приложение, чтобы избежать ошибок при горячей перезагрузке
-// FIX: Use functions from the imported namespace.
-const app = firebaseApp.getApps().length === 0 ? firebaseApp.initializeApp(firebaseConfig) : firebaseApp.getApp();
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 const auth = getAuth(app);
 const db = getFirestore(app);
